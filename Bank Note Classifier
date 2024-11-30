@@ -1,0 +1,212 @@
+#connect drive first
+
+#set dataset path 
+dataset_path="data_set_path"
+model_path="lenet_model.h5"
+plot_path="plot.png"
+
+# Import the necessary packages
+import tensorflow as tf
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.optimizers import Adam
+from sklearn.model_selection import train_test_split
+from tensorflow.keras.utils import img_to_array, to_categorical
+from imutils import paths
+import matplotlib.pyplot as plt
+import numpy as np
+import argparse
+import random
+import cv2
+import os
+
+# initialize the number of epochs to train for
+EPOCHS = 25
+INIT_LR = 1e-3
+BS = 32
+
+
+# import the necessary packages
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Activation, Flatten, Dense
+from keras import backend as K
+class LeNet:
+  @staticmethod
+  def build(width, height, depth, classes):
+    # initialize the model
+    model = Sequential()
+    inputShape = (height, width, depth)
+
+
+    # if we are using "channels first", update the input shape
+    if K.image_data_format() == "channels_first":
+      inputShape = (depth, height, width)
+
+
+    # first set of CONV => RELU => POOL layers
+    model.add(Conv2D(20, (5, 5), padding="same",
+      input_shape=inputShape))
+    model.add(Activation("relu"))
+    model.add(MaxPooling2D(pool_size=(2, 2), strides=(2, 2)))
+
+
+    # second set of CONV => RELU => POOL layers
+    model.add(Conv2D(50, (5, 5), padding="same"))
+    model.add(Activation("relu"))
+    model.add(MaxPooling2D(pool_size=(2, 2), strides=(2, 2)))
+
+
+    # first (and only) set of FC => RELU layers
+    model.add(Flatten())
+    model.add(Dense(500))
+    model.add(Activation("relu"))
+
+
+    # softmax classifier
+    model.add(Dense(classes))
+    model.add(Activation("softmax"))
+
+
+    # return the constructed network architecture
+    return model
+
+# checking for the directory
+!ls
+
+#-----------------------------------------------------------------------------------------------------------------------------------
+#Trainig phase
+# initialize the data and labels
+print("[INFO] loading images...")
+data = []
+labels = []
+
+
+# grab the image paths and randomly shuffle them
+imagePaths = sorted(list(paths.list_images(dataset_path)))
+random.seed(42)
+random.shuffle(imagePaths)
+
+
+# loop over the input images
+for imagePath in imagePaths:
+    # load the image, pre-process it, and store it in the data list
+    print(f"Processing image: {imagePath}")
+    image = cv2.imread(imagePath)
+    image = cv2.resize(image, (28, 28))
+    image = img_to_array(image)
+    data.append(image)
+
+
+    # extracting the class label from the image path and update the labels list
+    label = imagePath.split(os.path.sep)[-2]
+    #print(f"Extracted label: {label}")
+    label = 1 if label == "inr10" else 0
+    #print(f"Assigned numeric label: {label}")
+    labels.append(label)
+
+
+# scaling the raw pixel intensities to the range [0, 1]
+data = np.array(data, dtype="float") / 255.0
+labels = np.array(labels)
+
+
+# partition the data into training and testing splits using 75% of the data for training and the remaining 25% for testing
+(trainX, testX, trainY, testY) = train_test_split(data, labels, test_size=0.25, random_state=42)
+
+
+# converting the labels from integers to vectors
+trainY = to_categorical(trainY, num_classes=2)
+testY = to_categorical(testY, num_classes=2)
+
+
+# constructing the image generator for data augmentation
+aug = ImageDataGenerator(rotation_range=30, width_shift_range=0.1,
+                         height_shift_range=0.1, shear_range=0.2, zoom_range=0.2,
+                         horizontal_flip=True, fill_mode="nearest")
+
+
+# initializing the model
+print("[INFO] compiling model...")
+model = LeNet.build(width=28, height=28, depth=3, classes=2)
+opt = Adam(learning_rate =INIT_LR)
+model.compile(loss="binary_crossentropy", optimizer=opt, metrics=["accuracy"])
+
+
+# training the network
+print("[INFO] training network...")
+H = model.fit(aug.flow(trainX, trainY, batch_size=BS),
+              validation_data=(testX, testY), steps_per_epoch=len(trainX) // BS,
+              epochs=EPOCHS, verbose=1)
+
+
+# saving the model to disk
+print("[INFO] serializing network...")
+model.save(model_path)
+
+
+# ploting the training loss and accuracy
+plt.style.use("ggplot")
+plt.figure()
+N = EPOCHS
+plt.plot(np.arange(0, N), H.history["loss"], label="train_loss")
+plt.plot(np.arange(0, N), H.history["val_loss"], label="val_loss")
+plt.plot(np.arange(0, N), H.history["accuracy"], label="train_acc")
+plt.plot(np.arange(0, N), H.history["val_accuracy"], label="val_acc")
+plt.title("Training Loss and Accuracy on inr10/inr100")
+plt.xlabel("Epoch #")
+plt.ylabel("Loss/Accuracy")
+#plt.legend(loc="lower left")
+plt.savefig(plot_path)
+
+#---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#Testing phase
+
+image_path = "test_image_path" # we can vary the various image like image1, image2, image3, image4 so that we can get various prediction
+# for various output images
+model_path = "lenet_model.h5"
+
+# importing the necessary packages
+from tensorflow.keras.utils import img_to_array
+from keras.models import load_model
+import numpy as np
+import cv2
+import imutils
+
+
+# loading the image
+image = cv2.imread(image_path)
+orig = image.copy()
+
+
+# pre-procesing the image for classification
+image = cv2.resize(image, (28, 28))
+image = image.astype("float") / 255.0
+image = img_to_array(image)
+image = np.expand_dims(image, axis=0)
+
+
+# loading the trained convolutional neural network
+print("[INFO] loading network...")
+model = load_model(model_path)
+
+
+# classifing the input image
+(inr100, inr10) = model.predict(image)[0]
+
+
+# building the label
+label = "Label: 10 Rs, with Prob" if inr10 > inr100 else "Label: 100 Rs, with Prob"
+proba = inr10 if inr10 > inr100 else inr100
+label = "{}: {:.2f}%".format(label, proba * 100)
+print(label)
+
+
+plt.figure()
+# draw the label on the image
+output = imutils.resize(orig, width=400)
+cv2.putText(output, label, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+
+#final output image
+img1 = output[:, :, ::-1]
+plt.imshow(img1)
